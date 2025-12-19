@@ -16,7 +16,7 @@ sending frames. The included simulation adapter makes it possible to explore the
 
 **Getting started**
 
-1. Open `CanMonitor.sln` in Visual Studio 2022 or later (the project targets .NET 8.0 for Windows and uses WinForms).
+1. Open `CanMonitor.sln` in Visual Studio 2026 or later (the project targets .NET 8.0 for Windows and uses WinForms).
 2. Set `CanMonitor.WinForms` as the startup project.
 3. Press <kbd>F5</kbd> to run. Click **Connect** to start the built-in simulation, then use the format string box to experiment
    with the decoding rules documented below.
