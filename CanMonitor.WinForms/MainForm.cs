@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using CanMonitor.WinForms.Adapters;
@@ -9,169 +11,58 @@ using CanMonitor.WinForms.Utilities;
 
 namespace CanMonitor.WinForms
 {
-    public sealed class MainForm : Form
+    public sealed partial class MainForm : Form
     {
-        private readonly DataGridView _frameGrid = new();
-        private readonly TextBox _formatStringTextBox = new();
-        private readonly TextBox _sendIdTextBox = new() { PlaceholderText = "0x123" };
-        private readonly TextBox _sendDataTextBox = new() { PlaceholderText = "01 02 03" };
-        private readonly Label _connectionLabel = new();
-        private readonly Label _statusLabel = new();
-        private readonly Button _connectButton = new();
-        private readonly Button _disconnectButton = new();
-        private readonly Button _startSimulationButton = new();
-        private readonly Button _sendButton = new();
-        private readonly Button _clearButton = new();
-
+        private readonly Dictionary<int, int> _frameCounts = new();
+        private readonly Dictionary<int, DateTimeOffset> _lastFrameTimes = new();
         private readonly CanBusService _busService;
+        private readonly FormatStringParser _formatParser = new();
+        private bool _sortItemsLive = true;
 
         public MainForm()
         {
-            Text = "CAN Monitor 3000 (C# port)";
-            MinimumSize = new Size(900, 600);
+            InitializeComponent();
 
             _busService = new CanBusService(new SimulationAdapter());
             _busService.FrameReceived += BusServiceOnFrameReceived;
             _busService.ConnectionStateChanged += BusServiceOnConnectionStateChanged;
 
-            InitializeLayout();
+            connectButton.Click += async (_, _) => await ConnectAsync();
+            disconnectButton.Click += async (_, _) => await DisconnectAsync();
+            startSimulationButton.Click += (_, _) => StartSimulation();
+            clearButton.Click += (_, _) => frameGrid.Rows.Clear();
+            sendButton.Click += async (_, _) => await SendAsync();
+
+            aboutMenuItem.Click += (_, _) => ShowAbout();
+            loadTreeMenuItem.Click += (_, _) => ShowToast("Load Tree not implemented yet.");
+            saveTreeMenuItem.Click += (_, _) => ShowToast("Save Tree not implemented yet.");
+            traceMenuItem.Click += (_, _) => new TraceForm().Show(this);
+            simulatorMenuItem.Click += (_, _) => new SimulatorForm().Show(this);
+            commanderDirectoryMenuItem.Click += (_, _) => ShowToast("Commander directory picker not implemented yet.");
+            newCommanderMenuItem.Click += (_, _) => new CommanderForm().Show(this);
+            openCansoleMenuItem.Click += (_, _) => new CansoleForm().Show(this);
+
+            sortItemsLiveMenuItem.CheckedChanged += (_, _) => _sortItemsLive = sortItemsLiveMenuItem.Checked;
+            enableIdMenuItem.CheckedChanged += (_, _) => ToggleColumnVisibility(idColumn, enableIdMenuItem.Checked);
+            enableDlcMenuItem.CheckedChanged += (_, _) => ToggleColumnVisibility(dlcColumn, enableDlcMenuItem.Checked);
+            enableCountMenuItem.CheckedChanged += (_, _) => ToggleColumnVisibility(countColumn, enableCountMenuItem.Checked);
+            enablePeriodMenuItem.CheckedChanged += (_, _) => ToggleColumnVisibility(periodColumn, enablePeriodMenuItem.Checked);
+            enableRawDataMenuItem.CheckedChanged += (_, _) => ToggleColumnVisibility(rawDataColumn, enableRawDataMenuItem.Checked);
+            enableDecodedMenuItem.CheckedChanged += (_, _) => ToggleColumnVisibility(decodedDataColumn, enableDecodedMenuItem.Checked);
+            enableFormatMenuItem.CheckedChanged += (_, _) => ToggleColumnVisibility(formatColumn, enableFormatMenuItem.Checked);
+
+            adapterComboBox.SelectedIndexChanged += (_, _) => UpdateStatus($"Selected adapter: {adapterComboBox.SelectedItem}");
+
+            frameGrid.RowsAdded += (_, _) => ApplySorting();
+            Text = "CAN Monitor 3000 (C# port)";
+            connectionStatusLabel.Text = "Adapter: disconnected";
+            generalStatusLabel.Text = "Ready";
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             _busService.Dispose();
             base.OnFormClosing(e);
-        }
-
-        private void InitializeLayout()
-        {
-            var layout = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                ColumnCount = 1,
-                RowCount = 3,
-            };
-            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-
-            layout.Controls.Add(BuildToolbar(), 0, 0);
-            layout.Controls.Add(BuildGrid(), 0, 1);
-            layout.Controls.Add(BuildFooter(), 0, 2);
-
-            Controls.Add(layout);
-        }
-
-        private Control BuildToolbar()
-        {
-            var toolbar = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                FlowDirection = FlowDirection.LeftToRight,
-                AutoSize = true,
-                Padding = new Padding(8),
-            };
-
-            _connectButton.Text = "Connect";
-            _connectButton.Click += async (_, _) => await ConnectAsync();
-
-            _disconnectButton.Text = "Disconnect";
-            _disconnectButton.Click += async (_, _) => await DisconnectAsync();
-
-            _startSimulationButton.Text = "Start Simulation";
-            _startSimulationButton.Click += (_, _) => StartSimulation();
-
-            _clearButton.Text = "Clear";
-            _clearButton.Click += (_, _) => _frameGrid.Rows.Clear();
-
-            _formatStringTextBox.Width = 360;
-            _formatStringTextBox.PlaceholderText = "Format string (e.g. u8,u16,U32)";
-
-            toolbar.Controls.Add(_connectButton);
-            toolbar.Controls.Add(_disconnectButton);
-            toolbar.Controls.Add(_startSimulationButton);
-            toolbar.Controls.Add(_clearButton);
-            toolbar.Controls.Add(new Label
-            {
-                AutoSize = true,
-                Text = "Format string:",
-                Padding = new Padding(12, 8, 4, 0)
-            });
-            toolbar.Controls.Add(_formatStringTextBox);
-
-            return toolbar;
-        }
-
-        private Control BuildGrid()
-        {
-            _frameGrid.Dock = DockStyle.Fill;
-            _frameGrid.ReadOnly = true;
-            _frameGrid.AllowUserToAddRows = false;
-            _frameGrid.AllowUserToDeleteRows = false;
-            _frameGrid.RowHeadersVisible = false;
-            _frameGrid.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
-            _frameGrid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-
-            _frameGrid.Columns.Add("Time", "Time");
-            _frameGrid.Columns.Add("Id", "ID");
-            _frameGrid.Columns.Add("Length", "Len");
-            _frameGrid.Columns.Add("Data", "Data");
-            _frameGrid.Columns.Add("Decoded", "Decoded");
-
-            return _frameGrid;
-        }
-
-        private Control BuildFooter()
-        {
-            var footer = new TableLayoutPanel
-            {
-                ColumnCount = 2,
-                Dock = DockStyle.Fill,
-                AutoSize = true,
-                Padding = new Padding(8)
-            };
-            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70));
-            footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30));
-
-            var sendPanel = new FlowLayoutPanel
-            {
-                FlowDirection = FlowDirection.LeftToRight,
-                AutoSize = true,
-                Dock = DockStyle.Fill
-            };
-
-            sendPanel.Controls.Add(new Label { AutoSize = true, Text = "Send ID (hex):", Padding = new Padding(0, 8, 4, 0) });
-            sendPanel.Controls.Add(_sendIdTextBox);
-            sendPanel.Controls.Add(new Label { AutoSize = true, Text = "Data (hex bytes):", Padding = new Padding(12, 8, 4, 0) });
-            _sendDataTextBox.Width = 220;
-            sendPanel.Controls.Add(_sendDataTextBox);
-
-            _sendButton.Text = "Send";
-            _sendButton.Click += async (_, _) => await SendAsync();
-            sendPanel.Controls.Add(_sendButton);
-
-            footer.Controls.Add(sendPanel, 0, 0);
-
-            var statusPanel = new TableLayoutPanel
-            {
-                RowCount = 2,
-                ColumnCount = 1,
-                Dock = DockStyle.Fill,
-                AutoSize = true
-            };
-
-            _connectionLabel.AutoSize = true;
-            _connectionLabel.Text = "Adapter: disconnected";
-
-            _statusLabel.AutoSize = true;
-            _statusLabel.Text = "Ready";
-
-            statusPanel.Controls.Add(_connectionLabel, 0, 0);
-            statusPanel.Controls.Add(_statusLabel, 0, 1);
-
-            footer.Controls.Add(statusPanel, 1, 0);
-
-            return footer;
         }
 
         private async Task ConnectAsync()
@@ -202,103 +93,130 @@ namespace CanMonitor.WinForms
 
         private void StartSimulation()
         {
-            _busService.StartSimulation();
-            UpdateStatus("Simulation running");
+            try
+            {
+                _busService.StartSimulation();
+                UpdateStatus("Simulation started");
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"Simulation failed: {ex.Message}");
+            }
         }
 
         private async Task SendAsync()
         {
-            if (!_busService.IsConnected)
+            try
             {
-                UpdateStatus("Connect before sending frames.");
-                return;
+                var id = HexUtils.ParseHexId(sendIdTextBox.Text);
+                var data = HexUtils.ParseHexData(sendDataTextBox.Text);
+                var frame = new CanFrame { Id = id, Data = data };
+                await _busService.SendAsync(frame).ConfigureAwait(false);
+                UpdateStatus($"Sent frame 0x{id:X3}");
             }
-
-            if (!TryParseIdentifier(_sendIdTextBox.Text, out var id))
+            catch (Exception ex)
             {
-                UpdateStatus("Enter a valid hexadecimal identifier (e.g. 0x123).");
-                return;
+                UpdateStatus($"Send failed: {ex.Message}");
             }
-
-            if (!HexUtils.TryParseBytes(_sendDataTextBox.Text, out var data))
-            {
-                UpdateStatus("Enter valid hex bytes (e.g. 01 02 03).");
-                return;
-            }
-
-            if (data.Length > 8)
-            {
-                UpdateStatus("CAN frames support up to 8 bytes.");
-                return;
-            }
-
-            var frame = new CanFrame
-            {
-                Id = id,
-                Data = data,
-                Timestamp = DateTimeOffset.Now
-            };
-
-            await _busService.SendAsync(frame).ConfigureAwait(false);
-            UpdateStatus($"Sent {frame.Data.Length} bytes to 0x{frame.Id:X3}");
-        }
-
-        private void BusServiceOnConnectionStateChanged(object? sender, bool connected)
-        {
-            if (InvokeRequired)
-            {
-                BeginInvoke(new Action<object?, bool>(BusServiceOnConnectionStateChanged), sender, connected);
-                return;
-            }
-
-            _connectionLabel.Text = connected ? $"Adapter: {_busService.AdapterName}" : "Adapter: disconnected";
-            _connectButton.Enabled = !connected;
-            _disconnectButton.Enabled = connected;
-            _startSimulationButton.Enabled = connected;
-            _sendButton.Enabled = connected;
         }
 
         private void BusServiceOnFrameReceived(object? sender, CanFrame frame)
         {
             if (InvokeRequired)
             {
-                BeginInvoke(new Action<object?, CanFrame>(BusServiceOnFrameReceived), sender, frame);
-                return;
+                BeginInvoke(new Action(() => HandleFrame(frame)));
             }
-
-            if (!_busService.TryDecode(frame, _formatStringTextBox.Text, out var decoded))
+            else
             {
-                decoded = "Format error";
-            }
-
-            _frameGrid.Rows.Insert(0, frame.Timestamp.ToString("HH:mm:ss.fff"), frame.HexId, frame.Length, frame.DataAsHex, decoded);
-            if (_frameGrid.Rows.Count > 1000)
-            {
-                _frameGrid.Rows.RemoveAt(_frameGrid.Rows.Count - 1);
+                HandleFrame(frame);
             }
         }
 
-        private static bool TryParseIdentifier(string? text, out int id)
+        private void HandleFrame(CanFrame frame)
         {
-            id = 0;
-            if (string.IsNullOrWhiteSpace(text))
+            var count = _frameCounts.TryGetValue(frame.Id, out var currentCount) ? currentCount + 1 : 1;
+            _frameCounts[frame.Id] = count;
+
+            double? periodMs = null;
+            if (_lastFrameTimes.TryGetValue(frame.Id, out var lastTime))
             {
-                return false;
+                periodMs = (frame.Timestamp - lastTime).TotalMilliseconds;
+            }
+            _lastFrameTimes[frame.Id] = frame.Timestamp;
+
+            var decoded = _formatParser.TryFormat(frame, formatStringTextBox.Text, out var result)
+                ? result
+                : string.Empty;
+
+            var nodeText = $"{frame.HexId} ({frame.Length} bytes)";
+            var existingNode = frameTree.Nodes.Cast<TreeNode>().FirstOrDefault(n => n.Text.StartsWith(frame.HexId, StringComparison.OrdinalIgnoreCase));
+            if (existingNode == null)
+            {
+                frameTree.Nodes.Add(new TreeNode(nodeText));
+            }
+            else
+            {
+                existingNode.Text = nodeText;
             }
 
-            var sanitized = text.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? text[2..] : text;
-            return int.TryParse(sanitized, System.Globalization.NumberStyles.HexNumber, null, out id);
+            frameGrid.Rows.Add(
+                frame.HexId,
+                frame.Length,
+                count,
+                periodMs?.ToString("F1"),
+                frame.DataAsHex,
+                decoded,
+                formatStringTextBox.Text);
+
+            ApplySorting();
+        }
+
+        private void ApplySorting()
+        {
+            if (!_sortItemsLive)
+            {
+                return;
+            }
+
+            frameGrid.Sort(idColumn, System.ComponentModel.ListSortDirection.Ascending);
+        }
+
+        private void BusServiceOnConnectionStateChanged(object? sender, bool connected)
+        {
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action(() => UpdateConnectionState(connected)));
+            }
+            else
+            {
+                UpdateConnectionState(connected);
+            }
+        }
+
+        private void UpdateConnectionState(bool connected)
+        {
+            connectionStatusLabel.Text = connected ? "Adapter: connected" : "Adapter: disconnected";
+            generalStatusLabel.Text = connected ? "Ready" : "Disconnected";
         }
 
         private void UpdateStatus(string message)
         {
-            if (InvokeRequired)
-            {
-                BeginInvoke(new Action<string>(UpdateStatus), message);
-                return;
-            }
+            generalStatusLabel.Text = message;
+        }
 
-            _statusLabel.Text = message;
+        private void ToggleColumnVisibility(DataGridViewColumn column, bool isVisible)
+        {
+            column.Visible = isVisible;
+        }
+
+        private static void ShowToast(string message)
+        {
+            MessageBox.Show(message, "CAN Monitor", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private static void ShowAbout()
+        {
+            MessageBox.Show("CAN Monitor 3000 (C#)\nPorted from Qt project with modules for monitoring, transmit, and tools.", "About", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
     }
 }
