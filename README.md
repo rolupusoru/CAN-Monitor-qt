@@ -8,6 +8,20 @@ A gui-program for Windows and Linux which is ideally suited for looking at the d
 
 The aim is to support as many different CAN-adapters as possible and to make the program easy to use and yet powerfull.
 
+## C# / Visual Studio port
+
+A lightweight WinForms port is available for developers who prefer working in Visual Studio and C#. The solution lives in the
+`CanMonitor.WinForms` folder and mirrors the core ideas of the Qt application: monitoring traffic, formatting payloads, and
+sending frames. The included simulation adapter makes it possible to explore the UI without dedicated hardware.
+
+**Getting started**
+
+1. Open `CanMonitor.sln` in Visual Studio 2026 or later (the project targets .NET 8.0 for Windows and uses WinForms).
+2. Set `CanMonitor.WinForms` as the startup project.
+3. Press <kbd>F5</kbd> to run. Click **Connect** to start the built-in simulation, then use the format string box to experiment
+   with the decoding rules documented below.
+
+
 ## Supported CAN-adapters
 As of now, the following adapters are supported:
 
